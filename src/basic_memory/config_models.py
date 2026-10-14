@@ -414,6 +414,18 @@ class BasicMemoryConfig(BaseSettings):
         "Valid values: text, vector, hybrid. "
         "When unset, defaults to 'hybrid' if semantic search is enabled, otherwise 'text'.",
     )
+    script_segmentation: Literal["ngram", "jieba"] = Field(
+        default="ngram",
+        description="How full-text search splits scripts written without spaces (CJK, Thai, ...). "
+        "'ngram' indexes characters and ordered bigrams; 'jieba' indexes dictionary words "
+        "(SQLite only). Index writes and queries share the strategy; after a change the stored "
+        "script index text is rebuilt in place when the database is next opened.",
+    )
+    script_segmentation_user_dict: str | None = Field(
+        default=None,
+        description="Path of a jieba user dictionary (UTF-8, one 'word [frequency] [tag]' per "
+        "line) whose terms are segmented as whole words. Used by the 'jieba' strategy only.",
+    )
 
     # Reranker configuration (cross-encoder rescoring of the top vector/hybrid candidates)
     reranker_enabled: bool = Field(

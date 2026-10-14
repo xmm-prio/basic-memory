@@ -581,6 +581,7 @@ async def run_migrations(
         # management. Startup must still use the composition factory so configured
         # semantic-vector extensions are available during index initialization.
         from basic_memory.repository.search_repository import create_search_repository
+        from basic_memory.script_segmentation.startup import prepare_script_segmentation
 
         database_backend = (
             DatabaseBackend.POSTGRES
@@ -594,6 +595,7 @@ async def run_migrations(
             database_backend=database_backend,
         )
         await search_repository.init_search_index()
+        await prepare_script_segmentation(session_maker, app_config, database_backend)
 
     except Exception as e:  # pragma: no cover
         logger.error(f"Error running migrations: {e}")

@@ -3,6 +3,8 @@
 import unicodedata
 from dataclasses import dataclass
 
+from basic_memory.script_segmentation.active import active_script_segmenter
+
 
 _SCRIPT_BOUNDARY = "bm_script_boundary"
 
@@ -81,6 +83,16 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def build_script_ngrams(*texts: str | None) -> str:
+    """Build script index text with the configured segmentation strategy."""
+    return active_script_segmenter().build_index_text(*texts)
+
+
+def analyze_script_query(text: str) -> ScriptQuery:
+    """Analyze a query with the configured segmentation strategy."""
+    return active_script_segmenter().analyze_query(text)
+
+
+def build_ngram_index_text(*texts: str | None) -> str:
     """Build portable index text without depending on a database tokenizer."""
     gram_runs: list[str] = []
     for text in texts:
@@ -94,7 +106,7 @@ def build_script_ngrams(*texts: str | None) -> str:
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
-def analyze_script_query(text: str) -> ScriptQuery:
+def analyze_ngram_query(text: str) -> ScriptQuery:
     """Split a natural-language query into word text and ordered script grams."""
     normalized = unicodedata.normalize("NFKC", text)
     # Explicit Boolean expressions keep the existing backend parser. Splitting one
