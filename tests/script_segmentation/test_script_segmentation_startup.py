@@ -5,21 +5,21 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
+from basic_memory.repository.script_ngrams import install_script_segmentation
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
-from basic_memory.script_segmentation.active import active_script_segmenter, use_script_segmenter
 from basic_memory.script_segmentation.startup import prepare_script_segmentation
 
 
 @pytest_asyncio.fixture
 async def restore_segmenter() -> AsyncIterator[None]:
-    previous = active_script_segmenter()
     yield
-    use_script_segmenter(previous)
+    install_script_segmentation(None)
 
 
 def make_config(config_home, **overrides) -> BasicMemoryConfig:
@@ -40,11 +40,16 @@ def test_strategy_and_user_dictionary_are_read_from_the_environment(
     config = make_config(config_home)
 
     assert config.script_segmentation == "jieba"
-    assert config.script_segmentation_user_dict == str(config_home / "t.txt")
+    assert config.script_segmentation_user_dict == config_home / "t.txt"
 
 
 def test_upstream_ngram_strategy_is_the_default(config_home) -> None:
     assert make_config(config_home).script_segmentation == "ngram"
+
+
+def test_an_unknown_strategy_is_refused_by_the_config(config_home) -> None:
+    with pytest.raises(ValidationError, match="script_segmentation"):
+        make_config(config_home, script_segmentation="bigram")
 
 
 @pytest.mark.asyncio
@@ -83,7 +88,7 @@ async def test_opening_the_database_fails_when_the_user_dictionary_is_missing(
 ) -> None:
     missing = config_home / "no-such-terms.txt"
     config = make_config(
-        config_home, script_segmentation="jieba", script_segmentation_user_dict=str(missing)
+        config_home, script_segmentation="jieba", script_segmentation_user_dict=missing
     )
 
     try:

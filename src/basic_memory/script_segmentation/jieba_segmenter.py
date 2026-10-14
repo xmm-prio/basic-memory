@@ -7,7 +7,7 @@ from pathlib import Path
 
 import jieba
 
-from basic_memory.repository.script_ngrams import ScriptQuery, analyze_ngram_query, script_runs
+from basic_memory.repository.script_ngrams import ScriptQuery, script_runs
 
 # Part of the fingerprint: bump it when the index text layout changes.
 _INDEX_LAYOUT_VERSION = 1
@@ -57,8 +57,7 @@ class JiebaSegmenter:
                 terms.extend(word for word in words if len(word) > 1)
         return " ".join(terms)
 
-    def analyze_query(self, text: str) -> ScriptQuery:
-        query = analyze_ngram_query(text)
+    def refine_query(self, text: str, query: ScriptQuery) -> ScriptQuery:
         if not query.gram_phrases:
             return query
         words = dict.fromkeys(

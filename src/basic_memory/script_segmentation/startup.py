@@ -1,26 +1,16 @@
-"""Compose the configured script segmentation strategy when the database is opened."""
+"""Install the configured script segmentation strategy when the database is opened."""
 
-from pathlib import Path
+from typing import assert_never
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
-from basic_memory.script_segmentation.active import use_script_segmenter
-from basic_memory.script_segmentation.base import ScriptSegmenter
+from basic_memory.repository.script_ngrams import install_script_segmentation
 from basic_memory.script_segmentation.jieba_segmenter import JiebaSegmenter
-from basic_memory.script_segmentation.ngram import NgramSegmenter
-from basic_memory.script_segmentation.sqlite_index import align_sqlite_script_index
-
-
-def create_script_segmenter(app_config: BasicMemoryConfig) -> ScriptSegmenter:
-    """Build the strategy named by ``script_segmentation``."""
-    if app_config.script_segmentation == "jieba":
-        user_dict = app_config.script_segmentation_user_dict
-        return JiebaSegmenter(
-            cache_dir=app_config.data_dir_path,
-            user_dict=Path(user_dict) if user_dict else None,
-        )
-    return NgramSegmenter()
+from basic_memory.script_segmentation.sqlite_index import (
+    NGRAM_FINGERPRINT,
+    align_sqlite_script_index,
+)
 
 
 async def prepare_script_segmentation(
@@ -33,13 +23,25 @@ async def prepare_script_segmentation(
     Runs whenever a process opens the database, before anything is indexed or searched,
     so index writes and queries in every entry point use the same strategy.
     """
-    if database_backend != DatabaseBackend.SQLITE and app_config.script_segmentation != "ngram":
-        # Postgres also derives script text per FTS chunk; rebuilding that is not implemented.
-        raise ValueError(
-            f"script_segmentation={app_config.script_segmentation!r} requires the SQLite "
-            f"backend; {database_backend.value} supports only 'ngram'"
-        )
-    segmenter = create_script_segmenter(app_config)
+    match app_config.script_segmentation:
+        case "ngram":
+            install_script_segmentation(None)
+            fingerprint = NGRAM_FINGERPRINT
+        case "jieba":
+            if database_backend != DatabaseBackend.SQLITE:
+                # Postgres also derives script text per FTS chunk; rebuilding that is not
+                # implemented.
+                raise ValueError(
+                    "script_segmentation='jieba' requires the SQLite backend; "
+                    f"{database_backend.value} supports only 'ngram'"
+                )
+            segmenter = JiebaSegmenter(
+                cache_dir=app_config.data_dir_path,
+                user_dict=app_config.script_segmentation_user_dict,
+            )
+            install_script_segmentation(segmenter)
+            fingerprint = segmenter.fingerprint
+        case unsupported:  # pragma: no cover - the config field is a closed Literal
+            assert_never(unsupported)
     if database_backend == DatabaseBackend.SQLITE:
-        await align_sqlite_script_index(session_maker, segmenter)
-    use_script_segmenter(segmenter)
+        await align_sqlite_script_index(session_maker, fingerprint)

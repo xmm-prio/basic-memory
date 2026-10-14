@@ -421,7 +421,7 @@ class BasicMemoryConfig(BaseSettings):
         "(SQLite only). Index writes and queries share the strategy; after a change the stored "
         "script index text is rebuilt in place when the database is next opened.",
     )
-    script_segmentation_user_dict: str | None = Field(
+    script_segmentation_user_dict: Path | None = Field(
         default=None,
         description="Path of a jieba user dictionary (UTF-8, one 'word [frequency] [tag]' per "
         "line) whose terms are segmented as whole words. Used by the 'jieba' strategy only.",

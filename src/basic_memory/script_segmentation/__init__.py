@@ -1,5 +1,5 @@
 """Switchable segmentation strategies for scripts written without spaces between words.
 
-Import from the submodules: ``repository.script_ngrams`` imports ``active`` while it
-initializes, so this package must not import anything that imports it back.
+The strategies plug into ``repository.script_ngrams`` through its installable strategy
+seam; this package depends on that module, never the other way round.
 """

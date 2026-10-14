@@ -1,12 +1,11 @@
-"""Keep SQLite's stored script index text in step with the configured strategy."""
+"""Keep SQLite's stored script index text in step with the installed strategy."""
 
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.script_segmentation.base import ScriptSegmenter
-from basic_memory.script_segmentation.ngram import NgramSegmenter
+from basic_memory.repository.script_ngrams import build_script_ngrams
 
 # Created here rather than by an Alembic revision so the fork adds nothing to
 # upstream's migration chain.
@@ -38,37 +37,37 @@ _UPDATE_ROW = text("UPDATE search_index SET script_ngrams = :script_ngrams WHERE
 
 _BATCH_SIZE = 500
 _MIN_ROWID = -(2**63)
+
+NGRAM_FINGERPRINT = "ngram"
 # Index text written before the state table existed came from upstream n-grams.
-_UNRECORDED_FINGERPRINT = NgramSegmenter.fingerprint
+_UNRECORDED_FINGERPRINT = NGRAM_FINGERPRINT
 
 
 async def align_sqlite_script_index(
     session_maker: async_sessionmaker[AsyncSession],
-    segmenter: ScriptSegmenter,
+    fingerprint: str,
 ) -> None:
     """Rebuild the ``script_ngrams`` column in place when another strategy wrote it.
 
-    Every SQLite search row derives the column from its own title, content_stems and
-    content_snippet, so the rebuild rereads no files and leaves embeddings untouched.
-    The rows and the recorded fingerprint change in one transaction.
+    ``fingerprint`` identifies the strategy installed in this process, which rewrites
+    the rows through ``build_script_ngrams``. Every SQLite search row derives the column
+    from its own title, content_stems and content_snippet, so the rebuild rereads no
+    files and leaves embeddings untouched. The rows and the recorded fingerprint change
+    in one transaction.
     """
     async with db.scoped_session(session_maker) as session:
         await session.execute(_CREATE_STATE_TABLE)
         recorded = (await session.execute(_SELECT_FINGERPRINT)).scalar_one_or_none()
         previous = recorded or _UNRECORDED_FINGERPRINT
-        if previous == segmenter.fingerprint:
+        if previous == fingerprint:
             return
-        logger.info(
-            "Rebuilding script index text",
-            previous=previous,
-            current=segmenter.fingerprint,
-        )
-        rebuilt = await _rebuild_rows(session, segmenter)
-        await session.execute(_UPSERT_FINGERPRINT, {"fingerprint": segmenter.fingerprint})
-    logger.info("Rebuilt script index text", rows=rebuilt, current=segmenter.fingerprint)
+        logger.info("Rebuilding script index text", previous=previous, current=fingerprint)
+        rebuilt = await _rebuild_rows(session)
+        await session.execute(_UPSERT_FINGERPRINT, {"fingerprint": fingerprint})
+    logger.info("Rebuilt script index text", rows=rebuilt, current=fingerprint)
 
 
-async def _rebuild_rows(session: AsyncSession, segmenter: ScriptSegmenter) -> int:
+async def _rebuild_rows(session: AsyncSession) -> int:
     rebuilt = 0
     after = _MIN_ROWID
     while rows := (
@@ -79,7 +78,7 @@ async def _rebuild_rows(session: AsyncSession, segmenter: ScriptSegmenter) -> in
             [
                 {
                     "rowid": row.rowid,
-                    "script_ngrams": segmenter.build_index_text(
+                    "script_ngrams": build_script_ngrams(
                         row.title, row.content_stems, row.content_snippet
                     ),
                 }

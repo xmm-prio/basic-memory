@@ -2,8 +2,7 @@
 
 import unicodedata
 from dataclasses import dataclass
-
-from basic_memory.script_segmentation.active import active_script_segmenter
+from typing import Protocol
 
 
 _SCRIPT_BOUNDARY = "bm_script_boundary"
@@ -83,17 +82,9 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def build_script_ngrams(*texts: str | None) -> str:
-    """Build script index text with the configured segmentation strategy."""
-    return active_script_segmenter().build_index_text(*texts)
-
-
-def analyze_script_query(text: str) -> ScriptQuery:
-    """Analyze a query with the configured segmentation strategy."""
-    return active_script_segmenter().analyze_query(text)
-
-
-def build_ngram_index_text(*texts: str | None) -> str:
     """Build portable index text without depending on a database tokenizer."""
+    if _installed_segmentation is not None:
+        return _installed_segmentation.build_index_text(*texts)
     gram_runs: list[str] = []
     for text in texts:
         if not text:
@@ -106,7 +97,7 @@ def build_ngram_index_text(*texts: str | None) -> str:
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
-def analyze_ngram_query(text: str) -> ScriptQuery:
+def analyze_script_query(text: str) -> ScriptQuery:
     """Split a natural-language query into word text and ordered script grams."""
     normalized = unicodedata.normalize("NFKC", text)
     # Explicit Boolean expressions keep the existing backend parser. Splitting one
@@ -133,7 +124,43 @@ def analyze_ngram_query(text: str) -> ScriptQuery:
     # Preserve punctuation-only input as an explicit backend query. Dropping it would make
     # the repositories confuse user text with the intentional no-predicate wildcard path.
     word_text = " ".join(word_tokens) or (text if not gram_phrases else None)
-    return ScriptQuery(
+    query = ScriptQuery(
         word_text=word_text,
         gram_phrases=gram_phrases,
     )
+    if _installed_segmentation is not None:
+        return _installed_segmentation.refine_query(text, query)
+    return query
+
+
+# --- Fork (ADR 0001): installable script segmentation strategy ---
+
+
+class ScriptSegmentation(Protocol):
+    """A strategy that replaces the n-grams above for script index writes and queries.
+
+    A query matches only the terms its own strategy writes into the ``script_ngrams``
+    column, so index writes and queries must use the same strategy.
+    """
+
+    def build_index_text(self, *texts: str | None) -> str:
+        """Return space-separated index terms for the script runs in ``texts``."""
+        ...
+
+    def refine_query(self, text: str, query: ScriptQuery) -> ScriptQuery:
+        """Replace the n-gram terms of ``query``, the natural-language analysis of ``text``."""
+        ...
+
+
+_installed_segmentation: ScriptSegmentation | None = None
+
+
+def install_script_segmentation(segmentation: ScriptSegmentation | None) -> None:
+    """Route every later script index write and query of this process through ``segmentation``.
+
+    ``None`` restores the n-grams above. The strategy is process-wide because every search
+    backend reaches this module through module-level functions rather than an injected
+    dependency; ``script_segmentation.startup`` installs it when the database is opened.
+    """
+    global _installed_segmentation
+    _installed_segmentation = segmentation
