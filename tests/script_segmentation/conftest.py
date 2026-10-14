@@ -63,3 +63,15 @@ def search_ids(search_repository) -> Callable[[str], Awaitable[list[int]]]:
         return sorted(result.id for result in await search_repository.search(query))
 
     return search
+
+
+@pytest.fixture
+def relaxed_search_ids(search_repository) -> Callable[[str], Awaitable[list[int]]]:
+    """Run the full-text leg the way hybrid search does and return the row ids best first."""
+
+    async def search(query: str) -> list[int]:
+        results = await search_repository.search(query, allow_relaxed=True)
+        assert await search_repository.count(query, allow_relaxed=True) == len(results)
+        return [result.id for result in results]
+
+    return search

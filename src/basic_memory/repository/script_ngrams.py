@@ -14,6 +14,9 @@ class ScriptQuery:
 
     word_text: str | None
     gram_phrases: tuple[tuple[str, ...], ...]
+    # Fork (ADR 0001): phrases a zero-result relaxed retry may match any one of. Empty
+    # keeps every gram phrase required in the retry, as upstream does.
+    relaxed_phrases: tuple[tuple[str, ...], ...] = ()
 
 
 def is_script_search_character(character: str) -> bool:

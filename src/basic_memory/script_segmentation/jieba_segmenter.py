@@ -7,21 +7,30 @@ from pathlib import Path
 
 import jieba
 
-from basic_memory.repository.script_ngrams import ScriptQuery, script_runs
+from basic_memory.repository.script_ngrams import (
+    ScriptQuery,
+    is_script_search_character,
+    script_runs,
+)
 
 # Part of the fingerprint: bump it when the index text layout changes.
 _INDEX_LAYOUT_VERSION = 1
+# With a single distinctive word, an OR retry would only broaden the strict query.
+_MIN_RELAXED_PHRASES = 2
 
 
 class JiebaSegmenter:
     """Index jieba search-mode words plus single characters; query with jieba words.
 
-    Every query word is its own phrase and all of them must match. A multi-character
-    word therefore hits only notes where jieba produced that word, while a single
-    character still matches anywhere it occurs. Han text is segmented with jieba's
-    dictionary (plus the optional user dictionary); jieba leaves kana, Hangul and
-    other scripts as single characters. HMM new-word discovery stays off on both
-    sides, so every query word is a dictionary word that indexing can produce too.
+    The strict query requires every query word as its own phrase: a multi-character
+    word hits only notes where jieba produced that word, while a single character still
+    matches anywhere it occurs. A natural-language sentence rarely has all of its words
+    in one note, so the zero-result relaxed retry may match any one of its distinctive
+    words instead: the multi-character ones, since single characters are mostly
+    particles and pronouns. Han text is segmented with jieba's dictionary (plus the
+    optional user dictionary); jieba leaves kana, Hangul and other scripts as single
+    characters. HMM new-word discovery stays off on both sides, so every query word is a
+    dictionary word that indexing can produce too.
     """
 
     def __init__(self, *, cache_dir: Path, user_dict: Path | None = None) -> None:
@@ -60,12 +69,39 @@ class JiebaSegmenter:
     def refine_query(self, text: str, query: ScriptQuery) -> ScriptQuery:
         if not query.gram_phrases:
             return query
-        words = dict.fromkeys(
-            word
-            for run in script_runs(text)
-            for word in self._tokenizer.cut("".join(run), HMM=False)
+        words = tuple(
+            dict.fromkeys(
+                word
+                for run in script_runs(text)
+                for word in self._tokenizer.cut("".join(run), HMM=False)
+            )
         )
+        distinctive = tuple((word,) for word in words if len(word) > 1)
         return ScriptQuery(
-            word_text=query.word_text,
+            word_text=_without_script_text(query.word_text),
             gram_phrases=tuple((word,) for word in words),
+            relaxed_phrases=distinctive if len(distinctive) >= _MIN_RELAXED_PHRASES else (),
         )
+
+
+def _without_script_text(word_text: str | None) -> str | None:
+    """Split the word channel's mixed tokens at their script characters.
+
+    Upstream keeps a token such as ``ReadTimeoutError，连不上`` whole on the word channel,
+    where it matches only that exact adjacency; its script part is already a jieba
+    phrase, so only the Latin part stays a word. A part spelled like an FTS5 operator is
+    lowercased, as upstream does for whole tokens.
+    """
+    if word_text is None:
+        return None
+    parts = [
+        part
+        for token in word_text.split()
+        for part in "".join(
+            " " if is_script_search_character(character) else character for character in token
+        ).split()
+        if any(character.isalnum() for character in part)
+    ]
+    return (
+        " ".join(part.lower() if part in {"AND", "OR", "NOT"} else part for part in parts) or None
+    )
